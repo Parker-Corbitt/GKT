@@ -53,6 +53,17 @@ python train.py --model=GKT --graph-type=Dense --memory=athena --no-cuda
 Tune `--max-traces` and `--memory-decay` to control memory capacity and
 forgetting. The default `--memory=none` preserves the original GKT behavior.
 
+An alternative is the Ebbinghaus forgetting curve, using exponential
+retention `R(t) = exp(-t / S)` with a learned stability value for each trace:
+
+```bash
+python train.py --model=GKT --graph-type=Dense --memory=ebbinghaus --no-cuda
+```
+
+Use `--memory-stability` to set the baseline stability in sequence-time units.
+The memory interface accepts elapsed-time gaps, so real timestamps can replace
+sequence position when the dataset loader provides them.
+
 Run the compatibility smoke tests with:
 
 ```bash

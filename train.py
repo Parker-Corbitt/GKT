@@ -11,6 +11,7 @@ import torch.optim as optim
 from torch.optim import lr_scheduler
 from models import GKT, MultiHeadAttention, VAE, DKT
 from athena_memory import AthenaMemory
+from ebbinghaus_memory import EbbinghausMemory
 from metrics import KTLoss, VAELoss
 from processing import load_dataset
 
@@ -42,9 +43,10 @@ parser.add_argument('--load-dir', type=str, default='', help='Where to load the 
 parser.add_argument('--dkt-graph-dir', type=str, default='dkt-graph', help='Where to load the pretrained dkt graph.')
 parser.add_argument('--dkt-graph', type=str, default='dkt_graph.txt', help='DKT graph data file name.')
 parser.add_argument('--model', type=str, default='GKT', help='Model type to use, support GKT and DKT.')
-parser.add_argument('--memory', choices=['none', 'athena'], default='none', help='Optional memory integrated into GKT.')
+parser.add_argument('--memory', choices=['none', 'athena', 'ebbinghaus'], default='none', help='Optional memory integrated into GKT.')
 parser.add_argument('--max-traces', type=int, default=64, help='Maximum traces retained by Athena memory.')
 parser.add_argument('--memory-decay', type=float, default=0.5, help='Power-law recency decay for Athena memory.')
+parser.add_argument('--memory-stability', type=float, default=1.0, help='Baseline Ebbinghaus trace stability in sequence-time units.')
 parser.add_argument('--hid-dim', type=int, default=32, help='Dimension of hidden knowledge states.')
 parser.add_argument('--emb-dim', type=int, default=32, help='Dimension of concept embedding.')
 parser.add_argument('--attn-dim', type=int, default=32, help='Dimension of multi-head attention layers.')
@@ -62,7 +64,7 @@ parser.add_argument('--no-factor', action='store_true', default=False, help='Dis
 parser.add_argument('--prior', action='store_true', default=False, help='Whether to use sparsity prior.')
 parser.add_argument('--var', type=float, default=1, help='Output variance.')
 parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train.')
-parser.add_argument('--batch-size', type=int, default=128, help='Number of samples per batch.')
+parser.add_argument('--batch-size', type=int, default=256, help='Number of samples per batch.')
 parser.add_argument('--train-ratio', type=float, default=0.6, help='The ratio of training samples in a dataset.')
 parser.add_argument('--val-ratio', type=float, default=0.2, help='The ratio of validation samples in a dataset.')
 parser.add_argument('--shuffle', type=parse_bool, default=True, help='Whether to shuffle the dataset or not.')
@@ -141,6 +143,13 @@ if args.model == 'GKT':
             memory_dim=args.hid_dim,
             max_traces=args.max_traces,
             decay=args.memory_decay,
+        )
+    elif args.memory == 'ebbinghaus':
+        memory = EbbinghausMemory(
+            input_dim=args.emb_dim,
+            memory_dim=args.hid_dim,
+            max_traces=args.max_traces,
+            stability=args.memory_stability,
         )
     if args.graph_type == 'MHA':
         graph_model = MultiHeadAttention(args.edge_types, concept_num, args.emb_dim, args.attn_dim, dropout=args.dropout)

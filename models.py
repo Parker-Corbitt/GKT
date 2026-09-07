@@ -7,10 +7,12 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 try:
     from .athena_memory import AthenaMemory
+    from .ebbinghaus_memory import EbbinghausMemory
     from .layers import MLP, EraseAddGate, MLPEncoder, MLPDecoder, ScaledDotProductAttention
     from .utils import gumbel_softmax
 except ImportError:
     from athena_memory import AthenaMemory
+    from ebbinghaus_memory import EbbinghausMemory
     from layers import MLP, EraseAddGate, MLPEncoder, MLPDecoder, ScaledDotProductAttention
     from utils import gumbel_softmax
 
@@ -31,7 +33,7 @@ class GKT(nn.Module):
 
         self.res_len = 2 if binary else 12
         self.has_cuda = has_cuda
-        self.athena_memory = memory
+        self.memory = memory
 
         assert graph_type in ['Dense', 'Transition', 'DKT', 'PAM', 'MHA', 'VAE']
         self.graph_type = graph_type
@@ -80,10 +82,10 @@ class GKT(nn.Module):
         self.gru = nn.GRUCell(hidden_dim, hidden_dim, bias=bias)
         # prediction layer
         self.predict = nn.Linear(hidden_dim, 1, bias=bias)
-        if self.athena_memory is not None:
-            if self.athena_memory.input_dim != embedding_dim:
-                raise ValueError("Athena memory input_dim must equal embedding_dim")
-            self.memory_to_hidden = nn.Linear(self.athena_memory.memory_dim, hidden_dim, bias=False)
+        if self.memory is not None:
+            if self.memory.input_dim != embedding_dim:
+                raise ValueError("Memory input_dim must equal embedding_dim")
+            self.memory_to_hidden = nn.Linear(self.memory.memory_dim, hidden_dim, bias=False)
 
     # Aggregate step, as shown in Section 3.2.1 of the paper
     def _aggregate(self, xt, qt, ht, batch_size):
@@ -310,8 +312,8 @@ class GKT(nn.Module):
         rec_list = []  # reconstructed embedding list in VAE
         z_prob_list = []  # probability distribution of latent variable z in VAE
         memory_state = None
-        if self.athena_memory is not None:
-            memory_state = self.athena_memory.initial_state(
+        if self.memory is not None:
+            memory_state = self.memory.initial_state(
                 batch_size, features.device, self.emb_x.weight.dtype,
             )
         for i in range(seq_len):
@@ -319,11 +321,11 @@ class GKT(nn.Module):
             qt = questions[:, i]  # [batch_size]
             qt_mask = torch.ne(qt, -1)  # [batch_size], next_qt != -1
             tmp_ht = self._aggregate(xt, qt, ht, batch_size)  # [batch_size, concept_num, hidden_dim + embedding_dim]
-            if self.athena_memory is not None:
+            if self.memory is not None:
                 event = torch.zeros(batch_size, self.embedding_dim, device=features.device, dtype=tmp_ht.dtype)
                 event[qt_mask] = tmp_ht[qt_mask, qt[qt_mask].long(), self.hidden_dim:]
                 step_elapsed = None if elapsed is None else elapsed[:, i]
-                memory_state, memory_context, _, _ = self.athena_memory.step(
+                memory_state, memory_context, _, _ = self.memory.step(
                     memory_state, event, qt_mask, i, step_elapsed,
                 )
                 tmp_ht = tmp_ht.clone()
