@@ -5,7 +5,10 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
-from utils import build_dense_graph
+try:
+    from .utils import build_dense_graph
+except ImportError:
+    from utils import build_dense_graph
 
 # Graph-based Knowledge Tracing: Modeling Student Proficiency Using Graph Neural Network.
 # For more information, please refer to https://dl.acm.org/doi/10.1145/3350546.3352513
@@ -94,7 +97,10 @@ def load_dataset(file_path, batch_size, graph_type, dkt_graph_path=None, train_r
         answer_list.append(series['correct'].eq(1).astype('int').tolist())
         seq_len_list.append(series['correct'].shape[0])
 
-    df.groupby('user_id').apply(get_data)
+    for _, user_data in df.groupby('user_id', sort=False):
+        get_data(user_data)
+    if not seq_len_list:
+        raise ValueError(f"No users with at least two answers were found in {file_path}")
     max_seq_len = np.max(seq_len_list)
     print('max seq_len: ', max_seq_len)
     student_num = len(seq_len_list)

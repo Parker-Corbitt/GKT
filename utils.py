@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.autograd import Variable
 
 # Graph-based Knowledge Tracing: Modeling Student Proficiency Using Graph Neural Network.
 # For more information, please refer to https://dl.acm.org/doi/10.1145/3350546.3352513
@@ -35,9 +34,8 @@ def gumbel_softmax_sample(logits, tau=1, eps=1e-10, dim=-1):
     https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb
     """
     gumbel_noise = sample_gumbel(logits.size(), eps=eps)
-    if logits.is_cuda:
-        gumbel_noise = gumbel_noise.cuda()
-    y = logits + Variable(gumbel_noise)
+    gumbel_noise = gumbel_noise.to(device=logits.device, dtype=logits.dtype)
+    y = logits + gumbel_noise
     return F.softmax(y / tau, dim=dim)
 
 
@@ -61,19 +59,16 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     y_soft = gumbel_softmax_sample(logits, tau=tau, eps=eps, dim=dim)
     if hard:
         shape = logits.size()
-        _, k = y_soft.data.max(-1)
+        _, k = y_soft.detach().max(-1)
         # this bit is based on
         # https://discuss.pytorch.org/t/stop-gradients-for-st-gumbel-softmax/530/5
-        y_hard = torch.zeros(*shape)
-        if y_soft.is_cuda:
-            y_hard = y_hard.cuda()
-        y_hard = y_hard.zero_().scatter_(-1, k.view(shape[:-1] + (1,)), 1.0)
+        y_hard = torch.zeros_like(logits).scatter_(-1, k.view(shape[:-1] + (1,)), 1.0)
         # this cool bit of code achieves two things:
         # - makes the output value exactly one-hot (since we add then
         #   subtract y_soft value)
         # - makes the gradient equal to y_soft gradient (since we strip
         #   all other gradients)
-        y = Variable(y_hard - y_soft.data) + y_soft
+        y = y_hard - y_soft.detach() + y_soft
     else:
         y = y_soft
     return y

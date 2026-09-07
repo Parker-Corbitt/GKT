@@ -2,7 +2,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 
 # Graph-based Knowledge Tracing: Modeling Student Proficiency Using Graph Neural Network.
 # For more information, please refer to https://dl.acm.org/doi/10.1145/3350546.3352513
@@ -27,11 +26,14 @@ class MLP(nn.Module):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight.data)
-                m.bias.data.fill_(0.1)
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    with torch.no_grad():
+                        m.bias.fill_(0.1)
             elif isinstance(m, nn.BatchNorm1d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
+                with torch.no_grad():
+                    m.weight.fill_(1)
+                    m.bias.zero_()
 
     def batch_norm(self, inputs):
         if inputs.numel() == self.output_dim or inputs.numel() == 0:
@@ -71,7 +73,8 @@ class EraseAddGate(nn.Module):
 
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(0))
-        self.weight.data.uniform_(-stdv, stdv)
+        with torch.no_grad():
+            self.weight.uniform_(-stdv, stdv)
 
     def forward(self, x):
         r"""
@@ -143,8 +146,10 @@ class MLPEncoder(nn.Module):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight.data)
-                m.bias.data.fill_(0.1)
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    with torch.no_grad():
+                        m.bias.fill_(0.1)
 
     def node2edge(self, x, sp_send, sp_rec):
         # NOTE: Assumes that we have the same graph across all samples.
@@ -243,7 +248,7 @@ class MLPDecoder(nn.Module):
         # NOTE: Assumes that we have the same graph across all samples.
         # Node2edge
         pre_msg = self.node2edge(inputs, sp_send, sp_rec)
-        all_msgs = Variable(torch.zeros(pre_msg.size(0), self.msg_out_dim, device=inputs.device))  # [edge_num, msg_out_dim]
+        all_msgs = torch.zeros(pre_msg.size(0), self.msg_out_dim, device=inputs.device)  # [edge_num, msg_out_dim]
         for i in range(self.edge_type_num):
             msg = F.relu(self.msg_fc1[i](pre_msg))
             msg = F.dropout(msg, self.dropout, training=self.training)

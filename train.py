@@ -9,7 +9,6 @@ import datetime
 import torch
 import torch.optim as optim
 from torch.optim import lr_scheduler
-from torch.autograd import Variable
 from models import GKT, MultiHeadAttention, VAE, DKT
 from metrics import KTLoss, VAELoss
 from processing import load_dataset
@@ -20,8 +19,19 @@ from processing import load_dataset
 # Email: jhljx8918@gmail.com
 
 
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    value = value.lower()
+    if value in {'true', '1', 'yes', 'y'}:
+        return True
+    if value in {'false', '0', 'no', 'n'}:
+        return False
+    raise argparse.ArgumentTypeError(f'Expected a boolean value, got {value!r}')
+
+
 parser = argparse.ArgumentParser()
-parser.add_argument('--no-cuda', action='store_false', default=True, help='Disables CUDA training.')
+parser.add_argument('--no-cuda', action='store_true', help='Disables CUDA training.')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
 parser.add_argument('--data-dir', type=str, default='data', help='Data dir for loading input data.')
 parser.add_argument('--data-file', type=str, default='assistment_test15.csv', help='Name of input data file.')
@@ -39,8 +49,8 @@ parser.add_argument('--vae-decoder-dim', type=int, default=32, help='Dimension o
 parser.add_argument('--edge-types', type=int, default=2, help='The number of edge types to infer.')
 parser.add_argument('--graph-type', type=str, default='Dense', help='The type of latent concept graph.')
 parser.add_argument('--dropout', type=float, default=0, help='Dropout rate (1 - keep probability).')
-parser.add_argument('--bias', type=bool, default=True, help='Whether to add bias for neural network layers.')
-parser.add_argument('--binary', type=bool, default=True, help='Whether only use 0/1 for results.')
+parser.add_argument('--bias', type=parse_bool, default=True, help='Whether to add bias for neural network layers.')
+parser.add_argument('--binary', type=parse_bool, default=True, help='Whether only use 0/1 for results.')
 parser.add_argument('--result-type', type=int, default=12, help='Number of results types when multiple results are used.')
 parser.add_argument('--temp', type=float, default=0.5, help='Temperature for Gumbel softmax.')
 parser.add_argument('--hard', action='store_true', default=False, help='Uses discrete samples in training forward pass.')
@@ -51,11 +61,11 @@ parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to 
 parser.add_argument('--batch-size', type=int, default=128, help='Number of samples per batch.')
 parser.add_argument('--train-ratio', type=float, default=0.6, help='The ratio of training samples in a dataset.')
 parser.add_argument('--val-ratio', type=float, default=0.2, help='The ratio of validation samples in a dataset.')
-parser.add_argument('--shuffle', type=bool, default=True, help='Whether to shuffle the dataset or not.')
+parser.add_argument('--shuffle', type=parse_bool, default=True, help='Whether to shuffle the dataset or not.')
 parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate.')
 parser.add_argument('--lr-decay', type=int, default=200, help='After how epochs to decay LR by a factor of gamma.')
 parser.add_argument('--gamma', type=float, default=0.5, help='LR decay factor.')
-parser.add_argument('--test', type=bool, default=False, help='Whether to test for existed model.')
+parser.add_argument('--test', type=parse_bool, default=False, help='Whether to test for existed model.')
 parser.add_argument('--test-model-dir', type=str, default='logs/expDKT', help='Existed model file dir.')
 
 
@@ -64,6 +74,10 @@ args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 args.factor = not args.no_factor
 print(args)
+
+
+def load_checkpoint(path):
+    return torch.load(path, map_location='cuda' if args.cuda else 'cpu', weights_only=True)
 
 random.seed(args.seed)
 np.random.seed(args.seed)
@@ -79,6 +93,7 @@ res_len = 2 if args.binary else args.result_type
 # Save model and meta-data. Always saves in a new sub-folder.
 log = None
 save_dir = args.save_dir
+model_file = None
 if args.save_dir:
     exp_counter = 0
     now = datetime.datetime.now()
@@ -101,7 +116,7 @@ if args.save_dir:
     log = open(log_file, 'w')
     pickle.dump({'args': args}, open(meta_file, "wb"))
 else:
-    print("WARNING: No save_dir provided!" + "Testing (within this script) will throw an error.")
+    print("WARNING: No save_dir provided; testing is skipped after training.")
 
 # load dataset
 dataset_path = os.path.join(args.data_dir, args.data_file)
@@ -146,16 +161,12 @@ if args.load_dir:
     else:
         raise NotImplementedError(args.model + ' model is not implemented!')
     model_file = os.path.join(args.load_dir, model_file_name + '.pt')
-    optimizer_file = os.path.join(save_dir, model_file_name + '-Optimizer.pt')
-    scheduler_file = os.path.join(save_dir, model_file_name + '-Scheduler.pt')
-    model.load_state_dict(torch.load(model_file))
-    optimizer.load_state_dict(torch.load(optimizer_file))
-    scheduler.load_state_dict(torch.load(scheduler_file))
+    optimizer_file = os.path.join(args.load_dir, model_file_name + '-Optimizer.pt')
+    scheduler_file = os.path.join(args.load_dir, model_file_name + '-Scheduler.pt')
+    model.load_state_dict(load_checkpoint(model_file))
+    optimizer.load_state_dict(load_checkpoint(optimizer_file))
+    scheduler.load_state_dict(load_checkpoint(scheduler_file))
     args.save_dir = False
-
-# build optimizer
-optimizer = optim.Adam(model.parameters(), lr=args.lr)
-scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_decay, gamma=args.gamma)
 
 if args.model == 'GKT' and args.prior:
     prior = np.array([0.91, 0.03, 0.03, 0.03])  # TODO: hard coded for now
@@ -164,7 +175,6 @@ if args.model == 'GKT' and args.prior:
     log_prior = torch.FloatTensor(np.log(prior))
     log_prior = torch.unsqueeze(log_prior, 0)
     log_prior = torch.unsqueeze(log_prior, 0)
-    log_prior = Variable(log_prior)
     if args.cuda:
         log_prior = log_prior.cuda()
 
@@ -331,7 +341,9 @@ def test():
     if graph_model is not None:
         graph_model.eval()
     model.eval()
-    model.load_state_dict(torch.load(model_file))
+    if not model_file:
+        raise RuntimeError('No saved model is available for testing.')
+    model.load_state_dict(load_checkpoint(model_file))
     with torch.no_grad():
         for batch_idx, (features, questions, answers) in enumerate(test_loader):
             if args.cuda:
@@ -411,7 +423,8 @@ if args.test is False:
         print("Best Epoch: {:04d}".format(best_epoch), file=log)
         log.flush()
 
-test()
+if args.save_dir or args.test:
+    test()
 if log is not None:
     print(save_dir)
     log.close()

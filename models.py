@@ -5,9 +5,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-from torch.autograd import Variable
-from layers import MLP, EraseAddGate, MLPEncoder, MLPDecoder, ScaledDotProductAttention
-from utils import gumbel_softmax
+try:
+    from .layers import MLP, EraseAddGate, MLPEncoder, MLPDecoder, ScaledDotProductAttention
+    from .utils import gumbel_softmax
+except ImportError:
+    from layers import MLP, EraseAddGate, MLPEncoder, MLPDecoder, ScaledDotProductAttention
+    from utils import gumbel_softmax
 
 # Graph-based Knowledge Tracing: Modeling Student Proficiency Using Graph Neural Network.
 # For more information, please refer to https://dl.acm.org/doi/10.1145/3350546.3352513
@@ -145,7 +148,7 @@ class GKT(nn.Module):
             if self.graph_type == 'MHA':
                 query = self.emb_c(masked_qt)
                 key = concept_embedding
-                att_mask = Variable(torch.ones(self.edge_type_num, mask_num, self.concept_num, device=qt.device))
+                att_mask = torch.ones(self.edge_type_num, mask_num, self.concept_num, device=qt.device)
                 for k in range(self.edge_type_num):
                     index_tuple = (torch.arange(mask_num, device=qt.device), masked_qt.long())
                     att_mask[k] = att_mask[k].index_put(index_tuple, torch.zeros(mask_num, device=qt.device))
@@ -294,7 +297,7 @@ class GKT(nn.Module):
             z_prob: probability distribution of latent variable z in VAE (optional)
         """
         batch_size, seq_len = features.shape
-        ht = Variable(torch.zeros((batch_size, self.concept_num, self.hidden_dim), device=features.device))
+        ht = torch.zeros((batch_size, self.concept_num, self.hidden_dim), device=features.device)
         pred_list = []
         ec_list = []  # concept embedding list in VAE
         rec_list = []  # reconstructed embedding list in VAE
@@ -346,13 +349,14 @@ class MultiHeadAttention(nn.Module):
         Return:
             graphs: n_head types of inferred graphs
         """
-        graphs = Variable(torch.zeros(self.n_head, self.concept_num, self.concept_num, device=qt.device))
+        graphs = torch.zeros(self.n_head, self.concept_num, self.concept_num, device=qt.device)
         for k in range(self.n_head):
             index_tuple = (qt.long(), )
             graphs[k] = graphs[k].index_put(index_tuple, attn_score[k])  # used for calculation
             #############################
             # here, we need to detach edges when storing it into self.graphs in case memory leak!
-            self.graphs.data[k] = self.graphs.data[k].index_put(index_tuple, attn_score[k].detach())  # used for saving and visualization
+            with torch.no_grad():
+                self.graphs[k].copy_(self.graphs[k].index_put(index_tuple, attn_score[k].detach()))  # used for saving and visualization
             #############################
         return graphs
 
@@ -414,13 +418,14 @@ class VAE(nn.Module):
         """
         x_index = sp_send._indices()[1].long()  # send node index: [edge_num, ]
         y_index = sp_rec._indices()[1].long()   # receive node index [edge_num, ]
-        graphs = Variable(torch.zeros(self.edge_type_num, self.concept_num, self.concept_num, device=edges.device))
+        graphs = torch.zeros(self.edge_type_num, self.concept_num, self.concept_num, device=edges.device)
         for k in range(self.edge_type_num):
             index_tuple = (x_index, y_index)
             graphs[k] = graphs[k].index_put(index_tuple, edges[:, k])  # used for calculation
             #############################
             # here, we need to detach edges when storing it into self.graphs in case memory leak!
-            self.graphs.data[k] = self.graphs.data[k].index_put(index_tuple, edges[:, k].detach())  # used for saving and visualization
+            with torch.no_grad():
+                self.graphs[k].copy_(self.graphs[k].index_put(index_tuple, edges[:, k].detach()))  # used for saving and visualization
             #############################
         return graphs
 
@@ -466,7 +471,10 @@ class DKT(nn.Module):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight.data)
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    with torch.no_grad():
+                        m.bias.fill_(0.1)
             elif isinstance(m, (nn.LSTM)):
                 for i, weight in enumerate(m.parameters()):
                     if i < 2:
