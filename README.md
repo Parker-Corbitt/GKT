@@ -35,6 +35,24 @@ python train.py --data-file=skill_builder_data.csv --model=DKT
 
 The relevant options are `--data-dir` and `--save-dir`. Use `--no-cuda` for an explicit CPU run, or `--bias false`, `--binary false`, and `--shuffle false` for boolean settings that need to be disabled.
 
+## Athena memory inside GKT
+
+The project includes an Athena-inspired multiple-trace memory based on
+Briglia et al., [*Modeling an enactivist multiple-trace memory. ATHENA: A
+fractal model of human memory*](https://doi.org/10.1016/j.jmp.2017.12.002).
+When enabled, GKT writes each answered concept as a trace, retrieves traces by
+cue similarity and power-law recency, and fuses the retrieved context into the
+GKT hidden state before graph propagation and prediction.
+
+Enable it with:
+
+```bash
+python train.py --model=GKT --graph-type=Dense --memory=athena --no-cuda
+```
+
+Tune `--max-traces` and `--memory-decay` to control memory capacity and
+forgetting. The default `--memory=none` preserves the original GKT behavior.
+
 Run the compatibility smoke tests with:
 
 ```bash

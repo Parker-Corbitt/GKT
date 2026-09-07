@@ -10,6 +10,7 @@ import torch
 import torch.optim as optim
 from torch.optim import lr_scheduler
 from models import GKT, MultiHeadAttention, VAE, DKT
+from athena_memory import AthenaMemory
 from metrics import KTLoss, VAELoss
 from processing import load_dataset
 
@@ -41,6 +42,9 @@ parser.add_argument('--load-dir', type=str, default='', help='Where to load the 
 parser.add_argument('--dkt-graph-dir', type=str, default='dkt-graph', help='Where to load the pretrained dkt graph.')
 parser.add_argument('--dkt-graph', type=str, default='dkt_graph.txt', help='DKT graph data file name.')
 parser.add_argument('--model', type=str, default='GKT', help='Model type to use, support GKT and DKT.')
+parser.add_argument('--memory', choices=['none', 'athena'], default='none', help='Optional memory integrated into GKT.')
+parser.add_argument('--max-traces', type=int, default=64, help='Maximum traces retained by Athena memory.')
+parser.add_argument('--memory-decay', type=float, default=0.5, help='Power-law recency decay for Athena memory.')
 parser.add_argument('--hid-dim', type=int, default=32, help='Dimension of hidden knowledge states.')
 parser.add_argument('--emb-dim', type=int, default=32, help='Dimension of concept embedding.')
 parser.add_argument('--attn-dim', type=int, default=32, help='Dimension of multi-head attention layers.')
@@ -129,7 +133,15 @@ concept_num, graph, train_loader, valid_loader, test_loader = load_dataset(datas
 
 # build models
 graph_model = None
+memory = None
 if args.model == 'GKT':
+    if args.memory == 'athena':
+        memory = AthenaMemory(
+            input_dim=args.emb_dim,
+            memory_dim=args.hid_dim,
+            max_traces=args.max_traces,
+            decay=args.memory_decay,
+        )
     if args.graph_type == 'MHA':
         graph_model = MultiHeadAttention(args.edge_types, concept_num, args.emb_dim, args.attn_dim, dropout=args.dropout)
     elif args.graph_type == 'VAE':
@@ -141,7 +153,7 @@ if args.model == 'GKT':
     if args.cuda and args.graph_type in ['MHA', 'VAE']:
         graph_model = graph_model.cuda()
     model = GKT(concept_num, args.hid_dim, args.emb_dim, args.edge_types, args.graph_type, graph=graph, graph_model=graph_model,
-                dropout=args.dropout, bias=args.bias, has_cuda=args.cuda)
+                dropout=args.dropout, bias=args.bias, has_cuda=args.cuda, memory=memory)
 elif args.model == 'DKT':
     model = DKT(res_len * concept_num, args.emb_dim, concept_num, dropout=args.dropout, bias=args.bias)
 else:
