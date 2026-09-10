@@ -128,7 +128,7 @@ if args.save_dir:
     csv_file_path = os.path.join(save_dir, 'performance_log.csv')
     with open(csv_file_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['epoch', 'train_loss', 'train_auc', 'train_acc', 'val_loss', 'val_auc', 'val_acc'])
+        writer.writerow(['memory', 'epoch', 'train_loss', 'train_auc', 'train_acc', 'val_loss', 'val_auc', 'val_acc'])
 else:
     print("WARNING: No save_dir provided; testing is skipped after training.")
 
@@ -459,6 +459,7 @@ if args.test is False:
             with open(csv_file_path, 'a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
+                    args.memory,
                     epoch,
                     metrics['train_loss'], metrics['train_auc'], metrics['train_acc'],
                     metrics['val_loss'], metrics['val_auc'], metrics['val_acc']
