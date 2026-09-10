@@ -6,8 +6,10 @@ import pickle
 import os
 import gc
 import datetime
+import csv
 import torch
 import torch.optim as optim
+
 from torch.optim import lr_scheduler
 from models import GKT, MultiHeadAttention, VAE, DKT
 from athena_memory import AthenaMemory
@@ -121,6 +123,12 @@ if args.save_dir:
     log_file = os.path.join(save_dir, 'log.txt')
     log = open(log_file, 'w')
     pickle.dump({'args': args}, open(meta_file, "wb"))
+
+    # Performance logging CSV
+    csv_file_path = os.path.join(save_dir, 'performance_log.csv')
+    with open(csv_file_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['epoch', 'train_loss', 'train_auc', 'train_acc', 'val_loss', 'val_auc', 'val_acc'])
 else:
     print("WARNING: No save_dir provided; testing is skipped after training.")
 
@@ -340,6 +348,14 @@ def train(epoch, best_val_loss):
                   'time: {:.4f}s'.format(time.time() - t), file=log)
         log.flush()
     res = np.mean(loss_val)
+    metrics = {
+        'train_loss': np.mean(loss_train),
+        'train_auc': np.mean(auc_train),
+        'train_acc': np.mean(acc_train),
+        'val_loss': np.mean(loss_val),
+        'val_auc': np.mean(auc_val),
+        'val_acc': np.mean(acc_val),
+    }
     del loss_train
     del auc_train
     del acc_train
@@ -349,7 +365,7 @@ def train(epoch, best_val_loss):
     gc.collect()
     if args.cuda:
         torch.cuda.empty_cache()
-    return res
+    return res, metrics
 
 
 def test():
@@ -433,8 +449,21 @@ if args.test is False:
     t_total = time.time()
     best_val_loss = np.inf
     best_epoch = 0
+
+    csv_file_path = os.path.join(save_dir, 'performance_log.csv') if args.save_dir else None
+
     for epoch in range(args.epochs):
-        val_loss = train(epoch, best_val_loss)
+        val_loss, metrics = train(epoch, best_val_loss)
+
+        if csv_file_path:
+            with open(csv_file_path, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    epoch,
+                    metrics['train_loss'], metrics['train_auc'], metrics['train_acc'],
+                    metrics['val_loss'], metrics['val_auc'], metrics['val_acc']
+                ])
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
